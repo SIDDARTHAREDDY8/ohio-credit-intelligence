@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 // All requests go through the Vite dev proxy (/api -> http://localhost:8000).
 
 const BASE = "/api";
