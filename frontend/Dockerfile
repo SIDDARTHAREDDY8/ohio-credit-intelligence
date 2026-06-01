@@ -23,8 +23,8 @@ RUN echo 'server { \
     location / { \
         try_files $uri $uri/ /index.html; \
     } \
-    location /api { \
-        proxy_pass http://api:8000; \
+    location /api/ { \
+        proxy_pass http://api:8000/; \
         proxy_set_header Host $host; \
     } \
 }' > /etc/nginx/conf.d/default.conf
