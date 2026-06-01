@@ -16,8 +16,15 @@ docker compose down
 ### Run dbt (from transform/ directory)
 cd transform && dbt deps && dbt run && dbt test
 
-### Train ML model
+### Apply database migrations (Alembic)
+alembic upgrade head            # fresh DB
+alembic stamp head              # existing DB that already has the tables
+
+### Train ML model (also fits the isotonic probability calibrator)
 python ml/train.py
+
+### (Re)fit the probability calibrator against the current champion
+python ml/calibrate.py
 
 ### Run fairness audit
 python ml/fairness_audit.py
@@ -33,6 +40,9 @@ pytest tests/ -v
 
 ### Run unit tests only
 pytest tests/unit/ -v
+
+### Run the adverse-action notice eval harness (calls Claude)
+pytest tests/eval -m eval -v
 
 ### Check service health
 curl http://localhost:8000/health

@@ -5,17 +5,26 @@ decision-history, and monitoring endpoints. All decisions are persisted to
 public.decisions.
 """
 
+import logging
 import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from api.routers import decisions, monitoring, scoring
+from api.security import limiter
 from api.services.model_loader import model_service
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 START_TIME = time.time()
 
@@ -37,6 +46,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Rate limiting (slowapi): register the limiter and its 429 handler.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

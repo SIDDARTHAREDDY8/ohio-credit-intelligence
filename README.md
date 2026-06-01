@@ -77,9 +77,9 @@ Claude API is called **only** on a DECLINE.
 
 | Layer | Tools |
 |-------|-------|
-| **Data** | Python 3.11 · PostgreSQL 15 · dbt · Great Expectations · Prefect |
-| **ML** | LightGBM · SHAP · scikit-learn · MLflow (tracking + model registry) |
-| **API** | FastAPI · Pydantic v2 · Anthropic Claude API · SQLAlchemy |
+| **Data** | Python 3.11 · PostgreSQL 15 · dbt · Great Expectations · Prefect · Alembic (migrations) |
+| **ML** | LightGBM · SHAP · scikit-learn · isotonic calibration · MLflow (tracking + model registry) |
+| **API** | FastAPI · Pydantic v2 · Anthropic Claude API · SQLAlchemy · slowapi (rate limiting) · API-key auth |
 | **Frontend** | React 18 · TypeScript · Vite · plain CSS (no UI framework) |
 | **Infra** | Docker Compose · GitHub Actions CI/CD · AWS EC2 + RDS (deploy) |
 
@@ -105,7 +105,11 @@ git clone https://github.com/SIDDARTHAREDDY8/ohio-credit-intelligence
 cd ohio-credit-intelligence
 cp .env.example .env          # add your ANTHROPIC_API_KEY
 docker compose up -d          # postgres + mlflow
+alembic upgrade head          # create/upgrade the app schema (decisions, drift_log)
 ```
+
+> On a database that already has the tables (e.g. created by an earlier run),
+> run `alembic stamp head` once instead of `upgrade` to adopt migration tracking.
 
 Build the data → model → API:
 
@@ -117,8 +121,9 @@ python ingestion/flows/ingest_hmda.py
 # 2. transform
 cd transform && dbt deps && dbt run && dbt test && cd ..
 
-# 3. train + register the champion model
+# 3. train + register the champion model (train.py also fits the calibrator)
 python ml/train.py
+python ml/calibrate.py        # (re)fit isotonic calibrator against the champion
 python ml/fairness_audit.py
 
 # 4. serve
@@ -148,13 +153,15 @@ curl -X POST http://localhost:8000/score \
 ```
 ingestion/        # raw CSV → PostgreSQL loaders + Great Expectations checks
 transform/        # dbt project: staging → intermediate → marts (+ data tests)
-ml/               # train, evaluate, SHAP explain, fairness audit, promote
+ml/               # train, calibrate, evaluate, SHAP explain, fairness audit, promote
                   # config/ holds features.yaml + model_config.yaml
 api/              # FastAPI app: routers, schemas, services (model_loader,
-                  # feature_builder, claude_service), db connection
+                  # feature_builder, claude_service, notice_guardrails),
+                  # security (API-key auth + rate limit), db connection
 monitoring/       # PSI drift detector + alert rules
+migrations/       # Alembic migration scripts (versioned schema)
 frontend/         # React + TypeScript + Vite (Dashboard, Score, Monitoring)
-tests/            # 50 unit + 11 integration (pytest)
+tests/            # unit + integration + eval harness (pytest)
 infra/            # EC2 setup script + RDS init SQL
 .github/workflows # ci.yml (pytest + ruff) · deploy.yml (ECR + EC2)
 ```
@@ -164,18 +171,25 @@ infra/            # EC2 setup script + RDS init SQL
 ## Testing & CI
 
 ```bash
-pytest tests/unit/ -v          # 50 fast unit tests (no DB/MLflow/Claude needed)
-pytest tests/ -v               # full suite: 61 tests incl. live integration
+pytest tests/unit/ -v               # 67 fast unit tests (no DB/MLflow/Claude needed)
+pytest tests/ -v                    # full suite incl. live integration
+pytest tests/eval -m eval -v        # adverse-action notice compliance harness (Claude)
 ruff check api/ ml/ ingestion/ monitoring/
-cd transform && dbt test       # 27 dbt data-quality tests
+cd transform && dbt test            # 27 dbt data-quality tests
 ```
 
 - **Unit tests** cover tier/decision boundaries, feature engineering (FICO mid,
   loan-to-income, utilization rescaling, term formatting), label-encoder
-  unseen-value handling, Pydantic validation, and `/health`.
+  unseen-value handling, Pydantic validation, `/health`, the probability
+  calibration helper, API-key auth, and the adverse-action notice guardrails +
+  deterministic fallback.
 - **Integration tests** (marked `@pytest.mark.integration`) exercise the full
   stack end-to-end — scoring, SHAP, Postgres writes, the markdown-free Claude
   notice, and every endpoint.
+- **Eval harness** (marked `@pytest.mark.eval`) generates notices for several
+  declined-applicant fixtures and asserts each satisfies the ECOA/FCRA
+  guardrails (plain prose, second person, numbered reasons citing the
+  applicant's own figures, under 200 words).
 - **GitHub Actions** runs the unit suite + ruff on every push.
 
 ---
@@ -184,14 +198,31 @@ cd transform && dbt test       # 27 dbt data-quality tests
 
 - **MLflow model registry** with a `champion` alias and proxied artifact serving;
   the API loads `models:/ohio_credit_risk@champion` at startup.
+- **Probability calibration** — an isotonic calibrator (fit on out-of-fold
+  predictions, a separate artifact) maps raw LightGBM scores to true
+  probabilities, so a 30/100 risk score means ~30% expected default and the
+  tier cutoffs are meaningful. `train.py`/`calibrate.py` log a reliability
+  diagram and the Brier score before/after. SHAP still explains the raw tree
+  model; the API degrades to raw probabilities if no calibrator is present.
 - **Promotion gate** (`ml/promote.py`) only advances a new model if test AUC
   improves by more than 0.005 over the current champion.
 - **Feature parity** — `feature_builder.py` reproduces training-time encoding
   exactly (e.g. utilization is rescaled 0–1 → 0–100, `term` formatted as
   "36 months") so inference matches the trained marts.
-- **Compliance-first prompting** — the adverse-action system prompt forbids all
-  markdown, requires second person, numbered reasons citing the applicant's own
-  figures, and a concrete next step, kept under 200 words.
+- **Compliance-first prompting + guardrails** — the adverse-action system prompt
+  forbids all markdown and requires second person, numbered reasons citing the
+  applicant's own figures, and a concrete next step under 200 words. Every
+  generated notice is then *validated* against those rules in code
+  (`notice_guardrails.py`); a non-compliant draft triggers one corrective retry.
+- **Resilient generation** — if the Claude API is unavailable or keeps producing
+  non-compliant output, a deterministic, guardrail-passing fallback notice is
+  returned and tagged `notice_status="fallback"`, so a credit decision never
+  fails because letter generation hiccupped. Decision-log writes are likewise
+  wrapped so a logging failure can't 500 the response.
+- **API security** — `X-API-Key` auth (comma-separated keys for rotation;
+  disabled when unset for local/demo) plus per-client rate limiting on `/score`.
+- **Database migrations** — schema is versioned with Alembic
+  (`alembic upgrade head`) rather than ad hoc DDL.
 - **Fairness** — disparate-impact ratio vs the White + Male majority group;
   ratios below 0.80 are flagged as potential CFPB 4/5ths-rule violations.
 

@@ -23,6 +23,9 @@ class DecisionResponse(BaseModel):
     default_probability: float
     top_shap_factors: list[ShapFactor]
     adverse_action_notice: Optional[str] = None
+    # How the notice was produced: "generated" (Claude), "fallback" (deterministic
+    # template when Claude was unavailable/non-compliant), or "not_applicable".
+    notice_status: Literal["generated", "fallback", "not_applicable"] = "not_applicable"
     fairness_flags: list[str] = []
     model_version: str
     scored_at: datetime

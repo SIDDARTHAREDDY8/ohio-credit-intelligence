@@ -16,14 +16,20 @@ from mlflow.tracking import MlflowClient
 
 from api.schemas.applicant import ApplicantInput
 from api.services.feature_builder import ALL_FEATURES, build_feature_row
-from ml.common import apply_label_encoders, load_model_config, mlflow_tracking_uri
+from ml.common import (
+    apply_calibration,
+    apply_label_encoders,
+    load_model_config,
+    mlflow_tracking_uri,
+)
 
-ENCODER_PATH = os.path.join(
+_ENCODER_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
     "ml",
     "encoders",
-    "label_encoders.joblib",
 )
+ENCODER_PATH = os.path.join(_ENCODER_DIR, "label_encoders.joblib")
+CALIBRATOR_PATH = os.path.join(_ENCODER_DIR, "calibrator.joblib")
 
 TOP_N_FACTORS = 5
 
@@ -45,6 +51,7 @@ class ModelService:
     def __init__(self) -> None:
         self.model = None
         self.encoders = None
+        self.calibrator = None
         self.explainer = None
         self.model_version = "unknown"
         self._loaded = False
@@ -63,6 +70,15 @@ class ModelService:
         self.encoders = joblib.load(ENCODER_PATH)
         self.explainer = shap.TreeExplainer(self.model)
 
+        # Optional probability calibrator (isotonic). Absent on un-calibrated
+        # models; inference falls back to raw probabilities when missing.
+        if os.path.exists(CALIBRATOR_PATH):
+            self.calibrator = joblib.load(CALIBRATOR_PATH)
+            print("Loaded probability calibrator")
+        else:
+            self.calibrator = None
+            print("No calibrator found; serving raw model probabilities")
+
         try:
             mv = MlflowClient().get_model_version_by_alias(name, alias)
             self.model_version = str(mv.version)
@@ -78,7 +94,8 @@ class ModelService:
         raw = build_feature_row(applicant)
         encoded = apply_label_encoders(raw, self.encoders)
 
-        proba = float(self.model.predict_proba(encoded)[:, 1][0])
+        raw_proba = float(self.model.predict_proba(encoded)[:, 1][0])
+        proba = apply_calibration(raw_proba, self.calibrator)
         score = round(proba * 100, 2)
         tier, decision = score_to_tier_decision(score)
 
@@ -106,6 +123,8 @@ class ModelService:
             "tier": tier,
             "decision": decision,
             "default_probability": round(proba, 4),
+            "raw_default_probability": round(raw_proba, 4),
+            "calibrated": self.calibrator is not None,
             "top_shap_factors": factors,
             "model_version": self.model_version,
         }

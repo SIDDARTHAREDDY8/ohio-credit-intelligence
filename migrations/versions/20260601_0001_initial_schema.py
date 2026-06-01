@@ -1,9 +1,27 @@
--- Schemas
-CREATE SCHEMA IF NOT EXISTS raw;
+"""initial schema: raw + public tables
 
--- =============================================
--- RAW TABLES (written by ingestion scripts)
--- =============================================
+Baseline migration capturing the schema previously created ad hoc by
+infra/rds_init.sql. Statements use IF NOT EXISTS so the migration is safe to run
+against a database that already contains these objects; existing deployments can
+instead run ``alembic stamp head`` to mark this revision as applied.
+
+Revision ID: 0001_initial_schema
+Revises:
+Create Date: 2026-06-01
+"""
+from typing import Sequence, Union
+
+from alembic import op
+
+# revision identifiers, used by Alembic.
+revision: str = "0001_initial_schema"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+UPGRADE_SQL = """
+CREATE SCHEMA IF NOT EXISTS raw;
 
 CREATE TABLE IF NOT EXISTS raw.lending_club (
     id                  TEXT,
@@ -70,10 +88,6 @@ CREATE TABLE IF NOT EXISTS raw.synthetic_applicants (
     generated_at              TIMESTAMP DEFAULT NOW()
 );
 
--- =============================================
--- APP TABLES (written by API and monitoring)
--- =============================================
-
 CREATE TABLE IF NOT EXISTS public.decisions (
     id                      SERIAL PRIMARY KEY,
     applicant_id            TEXT NOT NULL,
@@ -86,7 +100,6 @@ CREATE TABLE IF NOT EXISTS public.decisions (
     decision                TEXT CHECK (decision IN ('APPROVE','REVIEW','DECLINE')),
     top_shap_factors        JSONB,
     adverse_action_notice   TEXT,
-    notice_status           TEXT DEFAULT 'not_applicable',
     fairness_flags          JSONB DEFAULT '[]',
     model_version           TEXT,
     created_at              TIMESTAMP DEFAULT NOW()
@@ -100,14 +113,26 @@ CREATE TABLE IF NOT EXISTS public.drift_log (
     logged_at   TIMESTAMP DEFAULT NOW()
 );
 
--- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_decisions_created_at
-    ON public.decisions(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_decisions_decision
-    ON public.decisions(decision);
-CREATE INDEX IF NOT EXISTS idx_decisions_risk_tier
-    ON public.decisions(risk_tier);
-CREATE INDEX IF NOT EXISTS idx_decisions_applicant_id
-    ON public.decisions(applicant_id);
-CREATE INDEX IF NOT EXISTS idx_drift_log_week_start
-    ON public.drift_log(week_start DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_created_at  ON public.decisions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_decision    ON public.decisions(decision);
+CREATE INDEX IF NOT EXISTS idx_decisions_risk_tier   ON public.decisions(risk_tier);
+CREATE INDEX IF NOT EXISTS idx_decisions_applicant_id ON public.decisions(applicant_id);
+CREATE INDEX IF NOT EXISTS idx_drift_log_week_start  ON public.drift_log(week_start DESC);
+"""
+
+DOWNGRADE_SQL = """
+DROP TABLE IF EXISTS public.drift_log;
+DROP TABLE IF EXISTS public.decisions;
+DROP TABLE IF EXISTS raw.synthetic_applicants;
+DROP TABLE IF EXISTS raw.hmda_ohio;
+DROP TABLE IF EXISTS raw.lending_club;
+DROP SCHEMA IF EXISTS raw;
+"""
+
+
+def upgrade() -> None:
+    op.execute(UPGRADE_SQL)
+
+
+def downgrade() -> None:
+    op.execute(DOWNGRADE_SQL)

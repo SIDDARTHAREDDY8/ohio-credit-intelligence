@@ -2,6 +2,14 @@
 
 const BASE = "/api";
 
+// Optional API key. When the backend requires auth (API_KEY set), the frontend
+// sends it via the X-API-Key header. Left undefined in local dev/demo.
+const API_KEY = import.meta.env.VITE_API_KEY as string | undefined;
+
+function authHeaders(): Record<string, string> {
+  return API_KEY ? { "X-API-Key": API_KEY } : {};
+}
+
 export interface ShapFactor {
   feature: string;
   shap_value: number;
@@ -17,6 +25,7 @@ export interface DecisionResponse {
   default_probability: number;
   top_shap_factors: ShapFactor[];
   adverse_action_notice: string | null;
+  notice_status: "generated" | "fallback" | "not_applicable";
   fairness_flags: string[];
   model_version: string;
   scored_at: string;
@@ -59,7 +68,7 @@ export interface Health {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`${path} returned ${res.status}`);
   return res.json();
 }
@@ -75,7 +84,7 @@ export async function scoreApplicant(
 ): Promise<DecisionResponse> {
   const res = await fetch(`${BASE}/score`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

@@ -20,7 +20,15 @@ import numpy as np
 from dotenv import load_dotenv
 from lightgbm import LGBMClassifier, early_stopping
 from mlflow.tracking import MlflowClient
-from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.calibration import calibration_curve
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import (
+    brier_score_loss,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import StratifiedKFold
 
 from ml.common import (
@@ -40,6 +48,7 @@ load_dotenv()
 
 ENCODER_DIR = os.path.join(os.path.dirname(__file__), "encoders")
 ENCODER_PATH = os.path.join(ENCODER_DIR, "label_encoders.joblib")
+CALIBRATOR_PATH = os.path.join(ENCODER_DIR, "calibrator.joblib")
 SCORE_DIST_PATH = os.path.join(ENCODER_DIR, "training_score_distribution.json")
 
 
@@ -78,6 +87,9 @@ def main():
         mlflow.log_params(params)
 
         fold_metrics = {"auc": [], "precision": [], "recall": [], "f1": []}
+        # Out-of-fold predictions: each row scored by a model that did not train
+        # on it. These unbiased predictions are used to fit the calibrator.
+        oof_proba = np.zeros(len(y))
         for fold, (tr_idx, va_idx) in enumerate(cv.split(X, y), start=1):
             X_tr, X_va = X.iloc[tr_idx], X.iloc[va_idx]
             y_tr, y_va = y[tr_idx], y[va_idx]
@@ -90,6 +102,7 @@ def main():
                 callbacks=[early_stopping(early_stop, verbose=False)],
             )
             proba = model.predict_proba(X_va)[:, 1]
+            oof_proba[va_idx] = proba
             preds = (proba >= 0.5).astype(int)
 
             auc = roc_auc_score(y_va, proba)
@@ -108,6 +121,38 @@ def main():
 
         for name, vals in fold_metrics.items():
             mlflow.log_metric(f"mean_{name}", float(np.mean(vals)))
+
+        # Probability calibration (isotonic) fit on out-of-fold predictions so the
+        # calibrator never sees a row the scoring model trained on. Saved as a
+        # separate artifact; the API applies it on top of the LightGBM model while
+        # SHAP keeps explaining the original tree model.
+        calibrator = IsotonicRegression(out_of_bounds="clip")
+        calibrator.fit(oof_proba, y)
+        joblib.dump(calibrator, CALIBRATOR_PATH)
+
+        brier_raw = brier_score_loss(y, oof_proba)
+        brier_cal = brier_score_loss(y, calibrator.predict(oof_proba))
+        mlflow.log_metric("brier_raw", brier_raw)
+        mlflow.log_metric("brier_calibrated", brier_cal)
+        mlflow.log_metric("brier_improvement", brier_raw - brier_cal)
+        print(f"Brier (OOF)  raw={brier_raw:.4f}  calibrated={brier_cal:.4f}")
+
+        frac_raw, mean_raw = calibration_curve(y, oof_proba, n_bins=10, strategy="quantile")
+        frac_cal, mean_cal = calibration_curve(
+            y, calibrator.predict(oof_proba), n_bins=10, strategy="quantile"
+        )
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.plot([0, 1], [0, 1], "k--", label="Perfectly calibrated")
+        ax.plot(mean_raw, frac_raw, marker="o", label=f"Raw (Brier {brier_raw:.3f})")
+        ax.plot(mean_cal, frac_cal, marker="s", label=f"Calibrated (Brier {brier_cal:.3f})")
+        ax.set_xlabel("Mean predicted probability")
+        ax.set_ylabel("Observed default frequency")
+        ax.set_title("Reliability Diagram (out-of-fold)")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        mlflow.log_figure(fig, "reliability_diagram.png")
+        plt.close(fig)
+        mlflow.log_artifact(CALIBRATOR_PATH, artifact_path="calibrator")
 
         # Final model on full training set
         final_model = LGBMClassifier(**params, verbose=-1)
@@ -151,8 +196,9 @@ def main():
             model_name, model_cfg["mlflow"]["champion_alias"], str(new_version)
         )
 
-        # Training score distribution baseline for the drift detector (0-100 scale)
-        scores = (train_proba * 100).tolist()
+        # Training score distribution baseline for the drift detector (0-100
+        # scale). Calibrated to match the scores the API actually serves.
+        scores = (calibrator.predict(train_proba) * 100).tolist()
         with open(SCORE_DIST_PATH, "w") as f:
             json.dump({"scores": scores}, f)
 

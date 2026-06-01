@@ -79,3 +79,16 @@ def ks_statistic(y_true: np.ndarray, y_proba: np.ndarray) -> float:
 
 def gini_from_auc(auc: float) -> float:
     return float(2 * auc - 1)
+
+
+def apply_calibration(proba: float, calibrator) -> float:
+    """Map a raw model probability to a calibrated one.
+
+    ``calibrator`` is a fitted ``sklearn.isotonic.IsotonicRegression`` (or any
+    object exposing ``predict``). When ``None`` the raw probability is returned
+    unchanged, so inference degrades gracefully if no calibrator artifact exists.
+    """
+    if calibrator is None:
+        return float(proba)
+    calibrated = float(calibrator.predict([float(proba)])[0])
+    return float(min(max(calibrated, 0.0), 1.0))
