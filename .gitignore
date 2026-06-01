@@ -1,0 +1,47 @@
+# Raw data — never commit
+data/raw/
+data/hmda/
+*.csv
+*.gz
+*.parquet
+
+# Secrets
+.env
+.env.local
+.env.production
+.env.save
+.env.*.save
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ML artifacts (tracked by MLflow instead)
+mlruns/
+mlflow_artifacts/
+*.pkl
+*.joblib
+ml/encoders/
+
+# dbt
+transform/target/
+transform/dbt_packages/
+transform/logs/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+*.swp
+Thumbs.db

@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: int_loan_features
+    description: "Engineered features from staging loans"
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: loan_to_income_ratio
+        tests:
+          - not_null
+      - name: emp_length_years
+        tests:
+          - not_null
+      - name: fico_mid
+        tests:
+          - not_null
+
+  - name: int_credit_history
+    description: "Credit history flags and metrics"
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique

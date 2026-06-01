@@ -1,0 +1,21 @@
+mlflow:
+  experiment_name: ohio_credit_risk
+  model_name: ohio_credit_risk
+  champion_alias: champion
+  artifact_path: lgbm_model
+
+training:
+  test_size: 0.3
+  random_state: 42
+  early_stopping_rounds: 50
+
+fairness:
+  majority_group: White
+  majority_sex: Male
+  min_disparate_impact_ratio: 0.8   # CFPB 4/5ths rule threshold
+  min_group_size: 100               # ignore groups smaller than this
+
+drift:
+  psi_warning_threshold: 0.1
+  psi_critical_threshold: 0.2
+  n_bins: 10

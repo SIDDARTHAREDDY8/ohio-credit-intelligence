@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: mart_training_set
+    description: "Final labeled dataset for LightGBM training"
+    columns:
+      - name: id
+        tests:
+          - not_null
+          - unique
+      - name: defaulted
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+      - name: is_train
+        tests:
+          - not_null
+
+  - name: mart_feature_store
+    description: "Live feature snapshot for API inference"
+
+  - name: mart_bias_audit
+    description: "HMDA approval rates by demographic group for fairness monitoring"
+    columns:
+      - name: race_label
+        tests:
+          - not_null
+      - name: approval_rate_pct
+        tests:
+          - not_null

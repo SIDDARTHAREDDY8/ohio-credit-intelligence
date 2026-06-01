@@ -1,0 +1,55 @@
+# Feature columns fed to LightGBM — ORDER MATTERS
+# feature_builder.py must produce columns in this exact order
+
+features:
+  numeric:
+    - loan_amount         # requested loan in dollars
+    - int_rate            # interest rate assigned
+    - installment         # monthly payment amount
+    - annual_inc          # annual income
+    - dti                 # debt-to-income ratio
+    - delinq_2yrs         # delinquencies in last 2 years
+    - fico_mid            # ENGINEERED: (fico_range_low + fico_range_high) / 2
+    - open_acc            # number of open credit accounts
+    - pub_rec             # number of public records
+    - revol_bal           # revolving balance
+    - revol_util          # revolving utilization rate
+    - total_acc           # total credit accounts
+    - loan_to_income_ratio  # ENGINEERED: loan_amount / annual_inc
+    - emp_length_years    # ENGINEERED: numeric years from text field
+
+  categorical:
+    - term                # "36 months" or "60 months"
+    - grade               # A B C D E F G
+    - sub_grade           # A1 A2 ... G5
+    - home_ownership      # RENT OWN MORTGAGE OTHER
+    - verification_status # Verified, Source Verified, Not Verified
+    - purpose             # debt_consolidation, credit_card, home_improvement, etc.
+
+target: defaulted         # 1 = defaulted/charged-off, 0 = fully paid
+
+model_params:
+  algorithm: lightgbm
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  num_leaves: 31
+  min_child_samples: 20
+  subsample: 0.8
+  colsample_bytree: 0.8
+  class_weight: balanced
+  random_state: 42
+
+cross_validation:
+  n_folds: 5
+  shuffle: true
+  random_state: 42
+
+thresholds:
+  tier_1_max: 20     # Score 0-20   → APPROVE
+  tier_2_max: 40     # Score 21-40  → APPROVE
+  tier_3_max: 60     # Score 41-60  → REVIEW
+  tier_4_max: 80     # Score 61-80  → DECLINE
+  tier_5_max: 100    # Score 81-100 → DECLINE
+
+encoder_path: ml/encoders/label_encoders.joblib

@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: stg_loans
+    description: "Cleaned and typed LendingClub loan records"
+    columns:
+      - name: id
+        description: "Loan ID"
+        tests:
+          - not_null
+      - name: loan_amount
+        tests:
+          - not_null
+      - name: defaulted
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+      - name: dti
+        tests:
+          - not_null
+      - name: annual_inc
+        tests:
+          - not_null
+      - name: home_ownership
+        tests:
+          - accepted_values:
+              values: ['RENT', 'OWN', 'MORTGAGE', 'OTHER', 'NONE', 'ANY']
+      - name: term
+        tests:
+          - accepted_values:
+              values: ['36 months', '60 months']
+
+  - name: stg_hmda
+    description: "Ohio HMDA 2023 mortgage applications with readable labels"
+    columns:
+      - name: action_taken_label
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Originated', 'Denied']
+      - name: race_label
+        tests:
+          - not_null

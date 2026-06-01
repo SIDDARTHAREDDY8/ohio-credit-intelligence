@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ohio_credit
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    # Host port 5433 (a native Postgres already owns localhost:5432 for other
+    # projects); container stays on 5432, so in-network service names are
+    # unaffected. Host clients use DATABASE_URL=...localhost:5433.
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/rds_init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ohio_credit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.11.1
+    # Host port 5001 (macOS Control Center occupies 5000); container stays on 5000.
+    ports:
+      - "5001:5000"
+    # psycopg2-binary installed at startup — the official MLflow image ships
+    # without a Postgres driver, required for the postgres backend store.
+    # --serve-artifacts proxies artifact upload/download through the server, so
+    # host clients never touch the container-local /mlflow path (which is
+    # read-only from the Mac). Artifacts land in the mlflow_artifacts volume.
+    entrypoint: >
+      /bin/bash -c "pip install psycopg2-binary --quiet &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://postgres:postgres@postgres:5432/ohio_credit
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
+      --default-artifact-root mlflow-artifacts:/"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    volumes:
+      - ./ml/encoders:/app/ml/encoders
+      - ./data/synthetic:/app/data/synthetic
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  mlflow_artifacts:

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: ohio_credit
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ohio_credit
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ohio_credit
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      MLFLOW_TRACKING_URI: http://localhost:5000
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Initialize database schema
+        run: psql $DATABASE_URL -f infra/rds_init.sql
+
+      - name: Install dbt packages
+        run: cd transform && dbt deps
+
+      - name: Copy dbt profiles
+        run: |
+          mkdir -p ~/.dbt
+          cp transform/profiles.yml.example ~/.dbt/profiles.yml
+
+      - name: Run dbt
+        run: cd transform && dbt run
+
+      - name: Run dbt tests
+        run: cd transform && dbt test
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check api/ ml/ ingestion/ monitoring/
