@@ -16,12 +16,13 @@ function fmtMoney(n: number): string {
 }
 
 function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("en-US", {
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/New_York",
     month: "short",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
+    hour12: true,
   });
 }
 
