@@ -6,8 +6,13 @@ built on the exact data + MLOps stack Ohio banks are hiring to build.**
 
 [![CI](https://github.com/SIDDARTHAREDDY8/ohio-credit-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/SIDDARTHAREDDY8/ohio-credit-intelligence/actions)
 
-**🔗 Live demo: [http://3.129.173.73:3000](http://3.129.173.73:3000)** — scoring API, dashboard, and
-monitoring pages running on AWS EC2 (us-east-2), deployed automatically from `main`.
+**🔗 Live demo:** running on AWS EC2 (us-east-2), deployed automatically from `main`:
+
+| | URL |
+|---|---|
+| **Dashboard / app** | [http://3.23.217.230:3000](http://3.23.217.230:3000) |
+| **API docs (Swagger)** | [http://3.23.217.230:8000/docs](http://3.23.217.230:8000/docs) |
+| **MLflow UI** | [http://3.23.217.230:5001](http://3.23.217.230:5001) |
 
 ---
 
