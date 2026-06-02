@@ -6,6 +6,9 @@ built on the exact data + MLOps stack Ohio banks are hiring to build.**
 
 [![CI](https://github.com/SIDDARTHAREDDY8/ohio-credit-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/SIDDARTHAREDDY8/ohio-credit-intelligence/actions)
 
+**🔗 Live demo: [http://3.129.173.73:3000](http://3.129.173.73:3000)** — scoring API, dashboard, and
+monitoring pages running on AWS EC2 (us-east-2), deployed automatically from `main`.
+
 ---
 
 ## What it does
@@ -81,7 +84,7 @@ Claude API is called **only** on a DECLINE.
 | **ML** | LightGBM · SHAP · scikit-learn · isotonic calibration · MLflow (tracking + model registry) |
 | **API** | FastAPI · Pydantic v2 · Anthropic Claude API · SQLAlchemy · slowapi (rate limiting) · API-key auth |
 | **Frontend** | React 18 · TypeScript · Vite · plain CSS (no UI framework) |
-| **Infra** | Docker Compose · GitHub Actions CI/CD · AWS EC2 + RDS (deploy) |
+| **Infra** | Docker Compose · GitHub Actions CI/CD (keyless OIDC auth) · AWS EC2 + RDS + ECR |
 
 ---
 
@@ -191,6 +194,60 @@ cd transform && dbt test            # 27 dbt data-quality tests
   guardrails (plain prose, second person, numbered reasons citing the
   applicant's own figures, under 200 words).
 - **GitHub Actions** runs the unit suite + ruff on every push.
+
+---
+
+## Deployment & CI/CD
+
+The platform runs as a set of Docker containers on **AWS EC2** (us-east-2), with
+the Postgres decision store on **RDS** and container images in **Amazon ECR**.
+Every push to `main` triggers a fully automated build-and-deploy.
+
+### Pipeline (`.github/workflows/deploy.yml`)
+
+```
+push to main
+   │
+   ├─ Configure AWS credentials  ── GitHub OIDC → sts:AssumeRoleWithWebIdentity
+   │                                (no long-lived AWS keys stored in GitHub)
+   ├─ Login to Amazon ECR
+   ├─ Build & push API image      ── ohio-credit-api:latest + :<git-sha>
+   ├─ Build & push frontend image ── ohio-credit-frontend:latest
+   └─ Deploy to EC2 (SSH)         ── git pull · docker compose pull · up -d
+```
+
+### Keyless auth with GitHub OIDC
+
+Authentication to AWS uses **OpenID Connect** instead of static access keys. An
+IAM OIDC identity provider trusts `token.actions.githubusercontent.com`, and the
+workflow assumes a dedicated role (`github-actions-deploy`) at runtime via
+`sts:AssumeRoleWithWebIdentity`. The role's trust policy is scoped to this repo's
+`main` branch, so only this pipeline can assume it:
+
+```jsonc
+// trust policy condition
+"StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+"StringLike":  { "token.actions.githubusercontent.com:sub":
+                 "repo:SIDDARTHAREDDY8/ohio-credit-intelligence:ref:refs/heads/main" }
+```
+
+The workflow only needs `permissions: id-token: write` to request the OIDC token.
+This removes the entire class of credential problems that come with rotating and
+syncing `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` GitHub secrets — there are
+no AWS keys to leak, expire, or fall out of sync.
+
+### Cross-platform images
+
+Images are built for **`linux/amd64`** (the EC2 host is x86_64) regardless of the
+build machine's architecture, and are tagged with both `latest` and the full
+commit SHA so any deploy is traceable to an exact commit and reproducible.
+
+### Runtime topology on EC2
+
+`docker compose` runs the frontend (nginx serving the built React SPA on port
+3000, reverse-proxying `/api/` to the API container), the FastAPI app (port
+8000), and connects to RDS Postgres for the decision log. The dashboard renders
+decision timestamps in **US Eastern Time** for the Ohio audience.
 
 ---
 
