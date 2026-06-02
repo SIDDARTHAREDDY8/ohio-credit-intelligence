@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+permissions:
+  id-token: write   # required for GitHub OIDC -> AWS STS
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -12,22 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug credential shape (no secret values exposed)
-        env:
-          AKID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          SAK: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          echo "access key id length (expect 20): ${#AKID}"
-          echo "secret access key length (expect 40): ${#SAK}"
-          echo "access key id prefix (expect AKIA/ASIA): ${AKID:0:4}"
-          # Detect leading/trailing whitespace without printing the secret
-          printf '%s' "$AKID" | grep -qE '^[A-Z0-9]{20}$' && echo "key id charset OK" || echo "key id has unexpected chars/whitespace"
-
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::496411574004:role/github-actions-deploy
           aws-region: us-east-2
 
       - name: Login to Amazon ECR
