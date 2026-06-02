@@ -12,6 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug credential shape (no secret values exposed)
+        env:
+          AKID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          SAK: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "access key id length (expect 20): ${#AKID}"
+          echo "secret access key length (expect 40): ${#SAK}"
+          echo "access key id prefix (expect AKIA/ASIA): ${AKID:0:4}"
+          # Detect leading/trailing whitespace without printing the secret
+          printf '%s' "$AKID" | grep -qE '^[A-Z0-9]{20}$' && echo "key id charset OK" || echo "key id has unexpected chars/whitespace"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
